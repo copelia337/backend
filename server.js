@@ -11,6 +11,7 @@ import salesRoutes from "./src/routes/salesRoutes.js"
 import customersRoutes from "./src/routes/customersRoutes.js"
 import reportsRoutes from "./src/routes/reportsRoutes.js"
 import cashRoutes from "./src/routes/cashRoutes.js"
+import ticketRoutes from "./src/routes/ticketRoutes.js"
 
 // Configuración
 dotenv.config()
@@ -20,7 +21,7 @@ const PORT = process.env.PORT || 5000
 // Middleware de seguridad mejorado
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
+    origin: process.env.FRONTEND_URL || "https://www.miniservice24.site",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -99,6 +100,7 @@ app.use("/api/sales", salesRoutes)
 app.use("/api/products", productsRoutes)
 app.use("/api/reports", reportsRoutes) // CORREGIDO: Montar en /api/reports
 app.use("/api/cash", cashRoutes) // AGREGADO: Ruta de cash
+app.use("/api/config", ticketRoutes)
 
 // Ruta de salud mejorada
 app.get("/api/health", async (req, res) => {
@@ -139,6 +141,7 @@ app.get("/", (req, res) => {
       customers: "/api/customers",
       reports: "/api/reports",
       cash: "/api/cash",
+      config: "/api/config",
       health: "/api/health",
     },
     documentation: "/api/docs", // Para futura implementación
@@ -205,6 +208,7 @@ app.use("*", (req, res) => {
       "/api/customers",
       "/api/reports",
       "/api/cash",
+      "/api/config",
       "/api/health",
     ],
   })
