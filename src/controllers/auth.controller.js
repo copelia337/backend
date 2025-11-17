@@ -92,89 +92,89 @@ export const login = async (req, res) => {
   }
 }
 
-// Registro público (crea empleado por defecto)
-export const register = async (req, res) => {
-  const { name, email, password } = req.body
+// // Registro público (crea empleado por defecto)
+// export const register = async (req, res) => {
+//   const { name, email, password } = req.body
 
-  try {
-    // Verificar si el email ya existe
-    const existingUsers = await executeQuery("SELECT id FROM users WHERE email = ?", [email])
+//   try {
+//     // Verificar si el email ya existe
+//     const existingUsers = await executeQuery("SELECT id FROM users WHERE email = ?", [email])
 
-    if (existingUsers.length > 0) {
-      logAuthEvent("register", email, false, "Email ya existe")
-      return res.status(400).json({
-        success: false,
-        message: "Ya existe una cuenta con este email",
-        code: "EMAIL_EXISTS",
-      })
-    }
+//     if (existingUsers.length > 0) {
+//       logAuthEvent("register", email, false, "Email ya existe")
+//       return res.status(400).json({
+//         success: false,
+//         message: "Ya existe una cuenta con este email",
+//         code: "EMAIL_EXISTS",
+//       })
+//     }
 
-    // Validaciones adicionales
-    if (name.trim().length < 2) {
-      return res.status(400).json({
-        success: false,
-        message: "El nombre debe tener al menos 2 caracteres",
-        code: "INVALID_NAME",
-      })
-    }
+//     // Validaciones adicionales
+//     if (name.trim().length < 2) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "El nombre debe tener al menos 2 caracteres",
+//         code: "INVALID_NAME",
+//       })
+//     }
 
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: "La contraseña debe tener al menos 6 caracteres",
-        code: "WEAK_PASSWORD",
-      })
-    }
+//     if (password.length < 6) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "La contraseña debe tener al menos 6 caracteres",
+//         code: "WEAK_PASSWORD",
+//       })
+//     }
 
-    // Hashear contraseña
-    const hashedPassword = await bcrypt.hash(password, 12)
+//     // Hashear contraseña
+//     const hashedPassword = await bcrypt.hash(password, 12)
 
-    // Crear usuario como empleado por defecto
-    const result = await executeQuery(
-      "INSERT INTO users (name, email, password, role, created_at) VALUES (?, ?, ?, 'empleado', CURRENT_TIMESTAMP)",
-      [name.trim(), email.toLowerCase(), hashedPassword],
-    )
+//     // Crear usuario como empleado por defecto
+//     const result = await executeQuery(
+//       "INSERT INTO users (name, email, password, role, created_at) VALUES (?, ?, ?, 'empleado', CURRENT_TIMESTAMP)",
+//       [name.trim(), email.toLowerCase(), hashedPassword],
+//     )
 
-    // Generar JWT para login automático
-    const token = jwt.sign(
-      {
-        userId: result.insertId,
-        email: email.toLowerCase(),
-        role: "empleado",
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: process.env.JWT_EXPIRES_IN || "24h",
-      },
-    )
+//     // Generar JWT para login automático
+//     const token = jwt.sign(
+//       {
+//         userId: result.insertId,
+//         email: email.toLowerCase(),
+//         role: "empleado",
+//       },
+//       process.env.JWT_SECRET,
+//       {
+//         expiresIn: process.env.JWT_EXPIRES_IN || "24h",
+//       },
+//     )
 
-    logAuthEvent("register", email, true)
+//     logAuthEvent("register", email, true)
 
-    res.status(201).json({
-      success: true,
-      message: "Cuenta creada exitosamente",
-      data: {
-        user: {
-          id: result.insertId,
-          name: name.trim(),
-          email: email.toLowerCase(),
-          role: "empleado",
-          active: true,
-        },
-        token,
-      },
-    })
-  } catch (error) {
-    console.error("Error en registro:", error)
-    logAuthEvent("register", email, false, error.message)
+//     res.status(201).json({
+//       success: true,
+//       message: "Cuenta creada exitosamente",
+//       data: {
+//         user: {
+//           id: result.insertId,
+//           name: name.trim(),
+//           email: email.toLowerCase(),
+//           role: "empleado",
+//           active: true,
+//         },
+//         token,
+//       },
+//     })
+//   } catch (error) {
+//     console.error("Error en registro:", error)
+//     logAuthEvent("register", email, false, error.message)
 
-    res.status(500).json({
-      success: false,
-      message: "Error interno del servidor. Intenta nuevamente.",
-      code: "INTERNAL_ERROR",
-    })
-  }
-}
+//     res.status(500).json({
+//       success: false,
+//       message: "Error interno del servidor. Intenta nuevamente.",
+//       code: "INTERNAL_ERROR",
+//     })
+//   }
+// }
 
 // Obtener perfil del usuario
 export const getProfile = async (req, res) => {
