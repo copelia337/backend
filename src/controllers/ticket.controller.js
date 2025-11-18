@@ -840,7 +840,8 @@ export const generateThermalPDF = async (req, res) => {
 
     // Agregado espacio adicional de 30 puntos al final
     // Espacio extra al final del ticket
-    yPosition = doc.y;
+    yPosition = doc.y + 2
+    yPosition = doc.y + 2
     doc.text('\n\n\n\n\n'); // 5 líneas en blanco (ajustable)
     // Finalizar el documento
     doc.end()
