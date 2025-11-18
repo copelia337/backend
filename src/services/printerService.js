@@ -1,191 +1,85 @@
-import escpos from 'escpos'
-import USB from 'usb'
-import { executeQuery } from '../config/database.js'
 import { ThermalPrinter, PrinterTypes } from 'node-thermal-printer'
+import { executeQuery } from '../config/database.js'
 
 class PrinterService {
   constructor() {
-    this.device = null
-    this.thermalPrinter = null
+    this.printer = null
     this.isConnected = false
-    this.printerName = null
-    this.printerConfig = null
-    this.printerType = null // 'USB' or 'WINDOWS'
+    this.connectedPrinterName = null
   }
 
+  /**
+   * Inicializar servicio y cargar configuración
+   */
   async initialize() {
     try {
       const config = await executeQuery('SELECT * FROM ticket_config LIMIT 1')
-      if (config.length > 0) {
-        this.printerConfig = config[0]
-        console.log('[PRINTER] Configuración cargada:', {
-          printerName: this.printerConfig.printer_name,
-          baudRate: this.printerConfig.baud_rate || 9600
-        })
-        
-        // Try to auto-connect if printer name is saved
-        if (this.printerConfig.printer_name) {
-          try {
-            await this.connectToPrinter(this.printerConfig.printer_name)
-            console.log('[PRINTER] Auto-conectado a:', this.printerConfig.printer_name)
-          } catch (error) {
-            console.log('[PRINTER] No se pudo auto-conectar:', error.message)
-          }
-        }
+      if (config.length > 0 && config[0].printer_name) {
+        console.log('[PRINTER] Auto-conectando a:', config[0].printer_name)
+        await this.connect(config[0].printer_name)
       }
     } catch (error) {
-      console.error('[PRINTER] Error al cargar configuración:', error.message)
+      console.log('[PRINTER] No se pudo auto-conectar:', error.message)
     }
   }
 
+  /**
+   * Detectar impresoras disponibles en Windows
+   */
   async detectPrinters() {
     try {
-      const allPrinters = []
+      console.log('[PRINTER] Detectando impresoras del sistema...')
       
-      // 1. Detect USB thermal printers
-      try {
-        const usbDevices = USB.getDeviceList()
-        console.log('[PRINTER] Dispositivos USB encontrados:', usbDevices.length)
-        
-        // Common thermal printer vendor IDs
-        const thermalVendors = [
-          { id: 0x0fe6, name: 'XPrinter' },
-          { id: 0x04b8, name: 'Epson' },
-          { id: 0x154f, name: 'SNBC' },
-          { id: 0x0416, name: 'Gowell' },
-          { id: 0x20d1, name: 'Star Micronics' },
-          { id: 0x0519, name: 'Star' },
-        ]
-        
-        const printerDevices = usbDevices.filter(device => {
-          try {
-            if (device.deviceDescriptor) {
-              const desc = device.deviceDescriptor
-              return thermalVendors.some(vendor => vendor.id === desc.idVendor)
-            }
-            return false
-          } catch (err) {
-            return false
-          }
-        })
-        
-        printerDevices.forEach((device) => {
-          const desc = device.deviceDescriptor
-          const vendor = thermalVendors.find(v => v.id === desc.idVendor)
-          allPrinters.push({
-            name: `${vendor?.name || 'USB'} Thermal (${desc.idVendor}:${desc.idProduct})`,
-            path: `USB:${desc.idVendor}:${desc.idProduct}`,
-            type: 'USB',
-            manufacturer: vendor?.name || 'Thermal Printer',
-            vendorId: desc.idVendor,
-            productId: desc.idProduct
-          })
-        })
-        
-        console.log('[PRINTER] Impresoras térmicas USB encontradas:', printerDevices.length)
-      } catch (usbError) {
-        console.log('[PRINTER] No se detectaron impresoras USB térmicas:', usbError.message)
-      }
-      
-      // 2. Detect Windows system printers using node-thermal-printer
-      try {
-        const printer = new ThermalPrinter({
-          type: PrinterTypes.EPSON,
-          interface: 'printer:Auto'
-        })
-        
-        // Get Windows printers list
-        const systemPrinters = await printer.getNetworkPrinters()
-        console.log('[PRINTER] Impresoras del sistema encontradas:', systemPrinters.length)
-        
-        systemPrinters.forEach(p => {
-          allPrinters.push({
-            name: p,
-            path: p,
-            type: 'WINDOWS',
-            manufacturer: 'Windows Printer',
-            isDefault: false
-          })
-        })
-      } catch (sysError) {
-        console.log('[PRINTER] No se detectaron impresoras del sistema:', sysError.message)
-      }
-      
-      console.log('[PRINTER] Total de impresoras detectadas:', allPrinters.length)
-      return allPrinters
-      
+      // Crear instancia temporal
+      const tempPrinter = new ThermalPrinter({
+        type: PrinterTypes.EPSON,
+        interface: 'printer:Auto'
+      })
+
+      const printers = await tempPrinter.getPrinters()
+      console.log('[PRINTER] Impresoras encontradas:', printers.length)
+
+      return printers.map(name => ({
+        name,
+        type: 'WINDOWS',
+        path: name,
+        manufacturer: 'Sistema Windows'
+      }))
     } catch (error) {
-      console.error('[PRINTER] Error al detectar impresoras:', error.message)
+      console.error('[PRINTER] Error detectando:', error.message)
       return []
     }
   }
 
-  async connectToPrinter(printerPath, baudRate = 9600) {
+  /**
+   * Conectar a una impresora específica
+   */
+  async connect(printerName) {
     try {
-      // Close existing connection
-      if (this.isConnected) {
-        await this.disconnectPrinter()
-      }
+      console.log('[PRINTER] Conectando a:', printerName)
 
-      console.log('[PRINTER] Conectando a:', printerPath)
-
-      if (printerPath.startsWith('USB:')) {
-        const [, vendorId, productId] = printerPath.split(':')
-        
-        const usbDevices = USB.getDeviceList()
-        const targetDevice = usbDevices.find(d => 
-          d.deviceDescriptor &&
-          d.deviceDescriptor.idVendor === parseInt(vendorId) && 
-          d.deviceDescriptor.idProduct === parseInt(productId)
-        )
-
-        if (!targetDevice) {
-          throw new Error('Impresora USB no encontrada')
+      this.printer = new ThermalPrinter({
+        type: PrinterTypes.EPSON,
+        interface: `printer:${printerName}`,
+        characterSet: 'PC437_USA',
+        removeSpecialCharacters: false,
+        lineCharacter: '-',
+        options: {
+          timeout: 5000
         }
+      })
 
-        // Create USB adapter for escpos
-        const adapter = new escpos.USB(parseInt(vendorId), parseInt(productId))
-        this.device = adapter
-        
-        await new Promise((resolve, reject) => {
-          adapter.open((error) => {
-            if (error) {
-              reject(error)
-            } else {
-              resolve()
-            }
-          })
-        })
-
-        this.printerType = 'USB'
-        
-      } else {
-        this.thermalPrinter = new ThermalPrinter({
-          type: PrinterTypes.EPSON,
-          interface: `printer:${printerPath}`,
-          characterSet: 'SLOVENIA',
-          removeSpecialCharacters: false,
-          lineCharacter: '-',
-          options: {
-            timeout: 5000
-          }
-        })
-
-        // Test connection
-        const isConnected = await this.thermalPrinter.isPrinterConnected()
-        if (!isConnected) {
-          throw new Error('No se pudo conectar a la impresora del sistema')
-        }
-
-        this.printerType = 'WINDOWS'
+      const connected = await this.printer.isPrinterConnected()
+      
+      if (!connected) {
+        throw new Error('No se pudo verificar la conexión con la impresora')
       }
 
       this.isConnected = true
-      this.printerName = printerPath
+      this.connectedPrinterName = printerName
+      console.log('[PRINTER] Conectado exitosamente')
       
-      console.log('[PRINTER] Conectado exitosamente a:', printerPath, 'Tipo:', this.printerType)
-      return true
-      
+      return { success: true, message: 'Impresora conectada correctamente' }
     } catch (error) {
       console.error('[PRINTER] Error de conexión:', error.message)
       this.isConnected = false
@@ -193,77 +87,90 @@ class PrinterService {
     }
   }
 
-  async sendToPrinter(data) {
-    if (!this.isConnected) {
+  /**
+   * Imprimir ticket usando comandos ESC/POS
+   */
+  async print(escposCommands) {
+    if (!this.isConnected || !this.printer) {
       throw new Error('Impresora no conectada')
     }
 
     try {
-      console.log('[PRINTER] Enviando a impresora, tamaño:', data.length, 'bytes, tipo:', this.printerType)
+      console.log('[PRINTER] Imprimiendo ticket...')
 
-      if (this.printerType === 'WINDOWS') {
-        // Convert ESC/POS commands to raw print
-        const buffer = Buffer.from(data, 'binary')
-        await this.thermalPrinter.raw(buffer)
-        await this.thermalPrinter.execute()
-        
-        console.log('[PRINTER] Trabajo de impresión enviado exitosamente')
-        return true
-        
-      } else {
-        return new Promise((resolve, reject) => {
-          const buffer = Buffer.from(data, 'binary')
-          
-          this.device.write(buffer, (error) => {
-            if (error) {
-              console.error('[PRINTER] Error de escritura USB:', error)
-              reject(error)
-            } else {
-              console.log('[PRINTER] Datos enviados a impresora USB exitosamente')
-              resolve(true)
-            }
-          })
-        })
-      }
-      
+      // Limpiar buffer
+      this.printer.clear()
+
+      // Enviar comandos ESC/POS como raw
+      this.printer.raw(Buffer.from(escposCommands, 'binary'))
+
+      // Ejecutar impresión
+      await this.printer.execute()
+
+      console.log('[PRINTER] Ticket impreso correctamente')
+      return { success: true, message: 'Ticket impreso correctamente' }
     } catch (error) {
-      console.error('[PRINTER] Error al enviar:', error.message)
+      console.error('[PRINTER] Error al imprimir:', error.message)
       throw error
     }
   }
 
-  async disconnectPrinter() {
-    if (this.device && this.printerType === 'USB') {
-      try {
-        await new Promise((resolve) => {
-          this.device.close(() => {
-            console.log('[PRINTER] Dispositivo USB cerrado')
-            resolve()
-          })
-        })
-      } catch (error) {
-        console.error('[PRINTER] Error al cerrar dispositivo:', error.message)
-      }
+  /**
+   * Imprimir ticket de prueba
+   */
+  async printTest() {
+    if (!this.isConnected || !this.printer) {
+      throw new Error('Impresora no conectada')
     }
-    
-    this.device = null
-    this.thermalPrinter = null
-    this.isConnected = false
-    this.printerType = null
-    console.log('[PRINTER] Desconectado')
+
+    try {
+      this.printer.clear()
+      this.printer.alignCenter()
+      this.printer.bold(true)
+      this.printer.setTextDoubleHeight()
+      this.printer.println('PRUEBA DE IMPRESORA')
+      this.printer.setTextNormal()
+      this.printer.bold(false)
+      this.printer.newLine()
+      this.printer.alignLeft()
+      this.printer.println('Si puede leer este texto,')
+      this.printer.println('su impresora funciona correctamente.')
+      this.printer.newLine()
+      this.printer.println(`Fecha: ${new Date().toLocaleString('es-AR')}`)
+      this.printer.newLine()
+      this.printer.newLine()
+      this.printer.newLine()
+      this.printer.cut()
+
+      await this.printer.execute()
+
+      console.log('[PRINTER] Ticket de prueba impreso')
+      return { success: true }
+    } catch (error) {
+      console.error('[PRINTER] Error en prueba:', error.message)
+      throw error
+    }
   }
 
-  isConnectedToPrinter() {
-    return this.isConnected
-  }
-
+  /**
+   * Obtener estado de la conexión
+   */
   getStatus() {
     return {
       connected: this.isConnected,
-      portName: this.printerName,
-      type: this.printerType,
-      config: this.printerConfig
+      printerName: this.connectedPrinterName,
+      type: 'WINDOWS'
     }
+  }
+
+  /**
+   * Desconectar
+   */
+  disconnect() {
+    this.printer = null
+    this.isConnected = false
+    this.connectedPrinterName = null
+    console.log('[PRINTER] Desconectado')
   }
 }
 

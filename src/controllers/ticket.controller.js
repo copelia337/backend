@@ -363,14 +363,13 @@ export const printTicketEscpos = async (req, res) => {
     if (!saleId) {
       return res.status(400).json({
         success: false,
-        message: 'El ID de la venta es requerido',
-        code: 'SALE_ID_REQUIRED'
+        message: 'El ID de la venta es requerido'
       })
     }
 
     // Obtener la venta
     const sales = await executeQuery(
-      `SELECT s.*, c.name as customer_name, JSON_EXTRACT(s.payment_methods, '$.method') as payment_method
+      `SELECT s.*, c.name as customer_name
        FROM sales s
        LEFT JOIN customers c ON s.customer_id = c.id
        WHERE s.id = ?`,
@@ -380,24 +379,19 @@ export const printTicketEscpos = async (req, res) => {
     if (sales.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Venta no encontrada',
-        code: 'SALE_NOT_FOUND'
+        message: 'Venta no encontrada'
       })
     }
 
-    // Obtener items de la venta
+    // Obtener items
     const items = await executeQuery(
       'SELECT * FROM sale_items WHERE sale_id = ?',
       [saleId]
     )
 
     // Obtener configuración
-    const businessConfig = await executeQuery(
-      'SELECT * FROM business_config LIMIT 1'
-    )
-    const ticketConfig = await executeQuery(
-      'SELECT * FROM ticket_config LIMIT 1'
-    )
+    const [businessConfig] = await executeQuery('SELECT * FROM business_config LIMIT 1')
+    const [ticketConfig] = await executeQuery('SELECT * FROM ticket_config LIMIT 1')
 
     const saleData = {
       sale: sales[0],
@@ -407,54 +401,46 @@ export const printTicketEscpos = async (req, res) => {
     // Generar comandos ESC/POS
     const escposCommands = escposService.generateTicket(
       saleData,
-      businessConfig[0] || {},
-      ticketConfig[0] || {}
+      businessConfig || {},
+      ticketConfig || {}
     )
 
-    console.log('[TICKET] Intentando imprimir ticket en impresora:', printerService.getStatus().portName)
-
-    if (printerService.isConnectedToPrinter()) {
+    // Intentar imprimir directamente si hay impresora conectada
+    if (printerService.isConnected) {
       try {
-        await printerService.sendToPrinter(escposCommands)
-        console.log('[TICKET] Ticket impreso exitosamente en la impresora')
+        await printerService.print(escposCommands)
         
         return res.json({
           success: true,
-          message: 'Ticket impreso correctamente en la impresora térmica',
-          code: 'TICKET_PRINTED_SUCCESS',
+          message: 'Ticket impreso correctamente',
           data: {
             saleId,
-            size: escposCommands.length,
-            method: 'printer'
+            method: 'direct_print'
           }
         })
-      } catch (printerError) {
-        console.error('[TICKET] Error enviando a impresora:', printerError.message)
-        // Fallback: devolver comandos en Base64
+      } catch (printError) {
+        console.error('[TICKET] Error al imprimir:', printError.message)
+        // Continuar y devolver comandos para que el frontend intente imprimir
       }
     }
 
-    const base64Commands = Buffer.from(escposCommands).toString('base64')
+    // Si no hay impresora o falló, devolver comandos en Base64
+    const base64Commands = Buffer.from(escposCommands, 'binary').toString('base64')
     
-    console.log('[TICKET] Impresora no conectada, devolviendo preview en Base64')
-
     res.json({
       success: true,
-      message: 'Ticket en modo preview (impresora no conectada)',
-      code: 'TICKET_PREVIEW_MODE',
+      message: 'Comandos ESC/POS generados (configure impresora en el navegador)',
       data: {
         saleId,
         commands: base64Commands,
-        size: escposCommands.length,
-        method: 'preview'
+        method: 'browser_print'
       }
     })
   } catch (error) {
-    console.error('Error al generar ticket:', error)
+    console.error('[TICKET] Error:', error)
     res.status(500).json({
       success: false,
       message: 'Error al generar el ticket',
-      code: 'TICKET_GENERATION_ERROR',
       error: error.message
     })
   }
@@ -467,15 +453,13 @@ export const detectPrinters = async (req, res) => {
     res.json({
       success: true,
       data: printers,
-      message: `Se encontraron ${printers.length} impresoras`,
-      code: 'PRINTERS_DETECTED'
+      message: `${printers.length} impresora(s) encontrada(s)`
     })
   } catch (error) {
-    console.error('Error detectando impresoras:', error)
+    console.error('[PRINTER] Error:', error)
     res.status(500).json({
       success: false,
       message: 'Error al detectar impresoras',
-      code: 'PRINTER_DETECTION_ERROR',
       error: error.message
     })
   }
@@ -483,39 +467,33 @@ export const detectPrinters = async (req, res) => {
 
 export const connectPrinter = async (req, res) => {
   try {
-    const { portPath, baudRate } = req.body
+    const { printerName } = req.body
 
-    if (!portPath) {
+    if (!printerName) {
       return res.status(400).json({
         success: false,
-        message: 'El puerto es requerido',
-        code: 'PORT_REQUIRED'
+        message: 'El nombre de la impresora es requerido'
       })
     }
 
-    await printerService.connectToPrinter(portPath, baudRate || 9600)
+    await printerService.connect(printerName)
 
-    // Guardar la configuración
+    // Guardar configuración
     await executeQuery(
-      `UPDATE ticket_config SET printer_name = ?, baud_rate = ? WHERE id = 1`,
-      [portPath, baudRate || 9600]
+      `UPDATE ticket_config SET printer_name = ? WHERE id = 1`,
+      [printerName]
     )
 
     res.json({
       success: true,
       message: 'Impresora conectada correctamente',
-      code: 'PRINTER_CONNECTED',
-      data: {
-        portPath,
-        baudRate: baudRate || 9600
-      }
+      data: { printerName }
     })
   } catch (error) {
-    console.error('Error conectando impresora:', error)
+    console.error('[PRINTER] Error:', error)
     res.status(500).json({
       success: false,
-      message: 'Error al conectar con la impresora',
-      code: 'PRINTER_CONNECT_ERROR',
+      message: 'Error al conectar impresora',
       error: error.message
     })
   }
@@ -527,15 +505,12 @@ export const getPrinterStatus = async (req, res) => {
     
     res.json({
       success: true,
-      data: status,
-      code: 'PRINTER_STATUS'
+      data: status
     })
   } catch (error) {
-    console.error('Error obteniendo estado de impresora:', error)
     res.status(500).json({
       success: false,
-      message: 'Error al obtener estado de la impresora',
-      code: 'PRINTER_STATUS_ERROR',
+      message: 'Error al obtener estado',
       error: error.message
     })
   }
@@ -543,76 +518,29 @@ export const getPrinterStatus = async (req, res) => {
 
 export const testPrint = async (req, res) => {
   try {
-    if (!printerService.isConnectedToPrinter()) {
+    if (!printerService.isConnected) {
       return res.status(400).json({
         success: false,
-        message: 'Impresora no conectada',
-        code: 'PRINTER_NOT_CONNECTED'
+        message: 'Impresora no conectada'
       })
     }
 
-    const testTicket = `
-    ╔════════════════════════════╗
-    ║    IMPRESORA FUNCIONANDO   ║
-    ║         ✓ OK ✓            ║
-    ║                            ║
-    ║  Fecha: ${new Date().toLocaleString('es-AR')}
-    ║                            ║
-    ╚════════════════════════════╝
-    `
-
-    const businessConfig = await executeQuery(
-      'SELECT * FROM business_config LIMIT 1'
-    )
-    const ticketConfig = await executeQuery(
-      'SELECT * FROM ticket_config LIMIT 1'
-    )
-
-    const testData = {
-      sale: {
-        id: 'TEST',
-        created_at: new Date(),
-        customer_name: 'CLIENTE PRUEBA',
-        payment_method: 'efectivo',
-        subtotal: 0,
-        total: 0
-      },
-      items: [
-        {
-          product_name: 'PRUEBA DE IMPRESORA',
-          quantity: 1,
-          unit_price: 0,
-          subtotal: 0,
-          total_amount: 0
-        }
-      ]
-    }
-
-    const escposCommands = escposService.generateTicket(
-      testData,
-      businessConfig[0] || {},
-      ticketConfig[0] || {}
-    )
-
-    await printerService.sendToPrinter(escposCommands)
+    await printerService.printTest()
 
     res.json({
       success: true,
-      message: 'Ticket de prueba enviado correctamente',
-      code: 'TEST_PRINT_SUCCESS'
+      message: 'Ticket de prueba impreso'
     })
   } catch (error) {
-    console.error('Error imprimiendo ticket de prueba:', error)
+    console.error('[PRINTER] Error:', error)
     res.status(500).json({
       success: false,
-      message: 'Error al imprimir ticket de prueba',
-      code: 'TEST_PRINT_ERROR',
+      message: 'Error al imprimir prueba',
       error: error.message
     })
   }
 }
 
-// ... rest of existing code ...
 
 function convertEscposToText(escposCommands) {
   // Convertir comandos ESC/POS a texto legible para preview
