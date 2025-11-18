@@ -2,7 +2,6 @@ import express from "express"
 import cors from "cors"
 import dotenv from "dotenv"
 import { testConnection } from "./src/config/database.js"
-import printerService from "./src/services/printerService.js"
 
 // Importar rutas
 import authRoutes from "./src/routes/authRoutes.js"
@@ -102,7 +101,6 @@ app.use("/api/products", productsRoutes)
 app.use("/api/reports", reportsRoutes) // CORREGIDO: Montar en /api/reports
 app.use("/api/cash", cashRoutes) // AGREGADO: Ruta de cash
 app.use("/api/config", ticketRoutes)
-app.use("/api/ticket", ticketRoutes)
 
 // Ruta de salud mejorada
 app.get("/api/health", async (req, res) => {
@@ -144,7 +142,6 @@ app.get("/", (req, res) => {
       reports: "/api/reports",
       cash: "/api/cash",
       config: "/api/config",
-      ticket: "/api/ticket", // AGREGADO: Mostrar ruta de ticket
       health: "/api/health",
     },
     documentation: "/api/docs", // Para futura implementación
@@ -212,7 +209,6 @@ app.use("*", (req, res) => {
       "/api/reports",
       "/api/cash",
       "/api/config",
-      "/api/ticket", // AGREGADO: Mostrar ruta de ticket
       "/api/health",
     ],
   })
@@ -231,18 +227,13 @@ const startServer = async () => {
       process.exit(1)
     }
 
-    console.log("🖨️ Inicializando servicio de impresora térmica...")
-    await printerService.initialize()
-    console.log("✅ Servicio de impresora inicializado")
-
     // Iniciar servidor
     const server = app.listen(PORT, () => {
       console.log("🚀 Servidor iniciado exitosamente")
       console.log(`📍 URL: http://localhost:${PORT}`)
       console.log(`🔗 API: http://localhost:${PORT}/api`)
       console.log(`💚 Health: http://localhost:${PORT}/api/health`)
-      console.log(`📊 Reports: http://localhost:${PORT}/api/reports`)
-      console.log(`🖨️ Ticket: http://localhost:${PORT}/api/ticket`)
+      console.log(`📊 Reports: http://localhost:${PORT}/api/reports`) // AGREGADO: Mostrar ruta de reportes
       console.log(`📊 Ambiente: ${process.env.NODE_ENV || "development"}`)
       console.log(`⏰ Iniciado: ${new Date().toISOString()}`)
     })
@@ -297,4 +288,3 @@ process.on("unhandledRejection", (reason, promise) => {
 })
 
 startServer()
- 

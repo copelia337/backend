@@ -4,12 +4,7 @@ import {
   updateBusinessConfig,
   getTicketConfig,
   updateTicketConfig,
-  getAllConfig,
-  printTicketEscpos,
-  detectPrinters,
-  connectPrinter,
-  getPrinterStatus,
-  testPrint
+  getAllConfig
 } from "../controllers/ticket.controller.js"
 import { authenticateToken } from "../middleware/auth.js"
 
@@ -27,11 +22,5 @@ router.put("/ticket", updateTicketConfig)
 
 // Ruta para obtener toda la configuración
 router.get("/all", getAllConfig)
-
-router.post("/print-escpos", printTicketEscpos)
-router.get("/printers/detect", detectPrinters)
-router.post("/printers/connect", connectPrinter)
-router.get("/printers/status", getPrinterStatus)
-router.post("/printers/test", testPrint)
 
 export default router
