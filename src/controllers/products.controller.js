@@ -989,6 +989,54 @@ export const getStockAlerts = async (req, res) => {
   }
 }
 
+// Capital en stock: total y desglose por producto (stock * precio de venta)
+export const getStockCapital = async (req, res) => {
+  try {
+    const [totalRow] = await executeQuery(`
+      SELECT COALESCE(SUM(stock * price), 0) as total_capital
+      FROM products
+    `)
+
+    const items = await executeQuery(`
+      SELECT 
+        p.id,
+        p.name,
+        p.stock,
+        p.unit_type,
+        p.price,
+        (p.stock * p.price) as value
+      FROM products p
+      WHERE p.stock > 0
+      ORDER BY (p.stock * p.price) DESC
+    `)
+
+    const totalCapital = Number(totalRow?.total_capital ?? 0)
+
+    return res.json({
+      success: true,
+      data: {
+        totalCapital,
+        productCount: items.length,
+        items: items.map((row) => ({
+          id: row.id,
+          name: row.name,
+          stock: Number(row.stock),
+          unit_type: row.unit_type,
+          price: Number(row.price),
+          value: Number(row.value),
+        })),
+      },
+    })
+  } catch (error) {
+    console.error("Error al calcular capital en stock:", error)
+    return res.status(500).json({
+      success: false,
+      message: "Error al calcular capital en stock",
+      code: "STOCK_CAPITAL_ERROR",
+    })
+  }
+}
+
 export const getStockStats = async (req, res) => {
   try {
     const generalStats = await executeQuery(`SELECT 

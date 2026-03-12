@@ -9,7 +9,8 @@ import {
   createStockMovement,
   getStockAlerts,
   getStockStats,
-  getTopSellingProducts, // NUEVO
+  getStockCapital,
+  getTopSellingProducts,
 } from "../controllers/products.controller.js"
 import { authenticateToken, requireRole } from "../middleware/auth.js"
 import { validateCreateProduct, validateUpdateProduct, validateStockMovement } from "../middleware/validation.js"
@@ -21,8 +22,9 @@ router.use(authenticateToken)
 
 // Rutas de productos
 router.get("/", getProducts)
-router.get("/top-selling", getTopSellingProducts) // NUEVO: Productos más vendidos
+router.get("/top-selling", getTopSellingProducts)
 router.get("/stats", getStockStats)
+router.get("/stock-capital", getStockCapital)
 router.get("/alerts", getStockAlerts)
 router.get("/:id", getProductById)
 router.post("/", validateCreateProduct, createProduct)
