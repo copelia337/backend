@@ -989,11 +989,13 @@ export const getStockAlerts = async (req, res) => {
   }
 }
 
-// Capital en stock: total y desglose por producto (stock * precio de venta)
+// Capital en stock: total por precio de venta y por costo, con desglose por producto
 export const getStockCapital = async (req, res) => {
   try {
-    const [totalRow] = await executeQuery(`
-      SELECT COALESCE(SUM(stock * price), 0) as total_capital
+    const [totalsRow] = await executeQuery(`
+      SELECT 
+        COALESCE(SUM(stock * price), 0) as total_venta,
+        COALESCE(SUM(stock * cost), 0) as total_costo
       FROM products
     `)
 
@@ -1004,18 +1006,22 @@ export const getStockCapital = async (req, res) => {
         p.stock,
         p.unit_type,
         p.price,
-        (p.stock * p.price) as value
+        p.cost,
+        (p.stock * p.price) as value_venta,
+        (p.stock * p.cost) as value_costo
       FROM products p
       WHERE p.stock > 0
       ORDER BY (p.stock * p.price) DESC
     `)
 
-    const totalCapital = Number(totalRow?.total_capital ?? 0)
+    const totalCapitalVenta = Number(totalsRow?.total_venta ?? 0)
+    const totalCapitalCosto = Number(totalsRow?.total_costo ?? 0)
 
     return res.json({
       success: true,
       data: {
-        totalCapital,
+        totalCapitalVenta,
+        totalCapitalCosto,
         productCount: items.length,
         items: items.map((row) => ({
           id: row.id,
@@ -1023,7 +1029,9 @@ export const getStockCapital = async (req, res) => {
           stock: Number(row.stock),
           unit_type: row.unit_type,
           price: Number(row.price),
-          value: Number(row.value),
+          cost: Number(row.cost),
+          valueVenta: Number(row.value_venta),
+          valueCosto: Number(row.value_costo),
         })),
       },
     })
