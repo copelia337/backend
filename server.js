@@ -2,6 +2,7 @@ import express from "express"
 import cors from "cors"
 import dotenv from "dotenv"
 import { testConnection } from "./src/config/database.js"
+import { ensureSaleItemUnitCost } from "./src/utils/saleItemCost.js"
 
 // Importar rutas
 import authRoutes from "./src/routes/authRoutes.js"
@@ -225,6 +226,13 @@ const startServer = async () => {
       console.error("❌ No se pudo conectar a la base de datos")
       console.error("💡 Verifique la configuración de la base de datos en las variables de entorno")
       process.exit(1)
+    }
+
+    try {
+      await ensureSaleItemUnitCost()
+      console.log("✅ Costo histórico de ventas listo")
+    } catch (costError) {
+      console.error("⚠️ No se pudo preparar el costo histórico de ventas:", costError.message)
     }
 
     // Iniciar servidor

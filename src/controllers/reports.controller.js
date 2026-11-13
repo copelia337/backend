@@ -1,4 +1,6 @@
 import { executeQuery } from "../config/database.js"
+import { buildSaleProfit, summarizeProfits } from "../utils/profitCalculator.js"
+import { ensureSaleItemUnitCost, saleItemsHaveUnitCost } from "../utils/saleItemCost.js"
 
 // Obtener reporte de ventas
 export const getSalesReport = async (req, res) => {
@@ -525,6 +527,185 @@ export const getReportsStats = async (req, res) => {
       success: false,
       message: "Error obteniendo estadísticas de reportes",
       code: "REPORTS_STATS_ERROR",
+    })
+  }
+}
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+function artDay(column) {
+  return `DATE(${column})`
+}
+
+function artKey(column) {
+  return `DATE_FORMAT(${column}, '%Y-%m-%d')`
+}
+
+function groupSaleRows(rows) {
+  const sales = new Map()
+
+  for (const row of rows) {
+    if (!sales.has(row.id)) {
+      sales.set(row.id, {
+        sale: {
+          id: row.id,
+          created_at: row.created_at,
+          sale_date: row.sale_date,
+          subtotal: row.subtotal,
+          discount: row.discount,
+          tax: row.tax,
+          total: row.total,
+          payment_method: row.payment_method,
+          customer_name: row.customer_name,
+          cashier_name: row.cashier_name,
+        },
+        items: [],
+      })
+    }
+
+    if (row.item_id != null) {
+      sales.get(row.id).items.push({
+        id: row.item_id,
+        product_id: row.product_id,
+        product_name: row.product_name,
+        quantity: row.quantity,
+        unit_price: row.unit_price,
+        unit_cost: row.unit_cost,
+        subtotal: row.item_subtotal,
+        unit_type: row.unit_type,
+      })
+    }
+  }
+
+  return Array.from(sales.values()).map(({ sale, items }) => buildSaleProfit(sale, items))
+}
+
+// Ganancia del rango: precio cobrado menos costo, y egresos de caja (gastos y retiros).
+export const getProfitsReport = async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query
+
+    if (!DATE_PATTERN.test(start_date || "") || !DATE_PATTERN.test(end_date || "")) {
+      return res.status(400).json({
+        success: false,
+        message: "Indicá un rango de fechas válido",
+        code: "INVALID_DATE_RANGE",
+      })
+    }
+
+    if (start_date > end_date) {
+      return res.status(400).json({
+        success: false,
+        message: "La fecha inicial no puede ser posterior a la fecha final",
+        code: "INVALID_DATE_RANGE",
+      })
+    }
+
+    try {
+      await ensureSaleItemUnitCost()
+    } catch (migrationError) {
+      console.error("No se pudo preparar el costo histórico de las ventas:", migrationError)
+    }
+
+    const hasUnitCost = await saleItemsHaveUnitCost()
+    const unitCostSql = hasUnitCost ? "COALESCE(si.unit_cost, p.cost, 0)" : "COALESCE(p.cost, 0)"
+
+    const [saleRows, expenseRows, cancelledRows] = await Promise.all([
+      executeQuery(
+        `
+        SELECT
+          s.id,
+          s.created_at,
+          ${artKey("s.created_at")} AS sale_date,
+          s.subtotal,
+          s.discount,
+          s.tax,
+          s.total,
+          s.payment_method,
+          c.name AS customer_name,
+          u.name AS cashier_name,
+          si.id AS item_id,
+          si.product_id,
+          si.quantity,
+          si.unit_price,
+          si.subtotal AS item_subtotal,
+          ${unitCostSql} AS unit_cost,
+          COALESCE(si.unit_type, p.unit_type, 'unidades') AS unit_type,
+          p.name AS product_name
+        FROM sales s
+        LEFT JOIN customers c ON c.id = s.customer_id
+        LEFT JOIN users u ON u.id = s.user_id
+        LEFT JOIN sale_items si ON si.sale_id = s.id
+        LEFT JOIN products p ON p.id = si.product_id
+        WHERE s.status = 'completed'
+          AND ${artDay("s.created_at")} >= ?
+          AND ${artDay("s.created_at")} <= ?
+        ORDER BY s.created_at DESC, s.id DESC, si.id ASC
+        `,
+        [start_date, end_date],
+      ),
+      executeQuery(
+        `
+        SELECT
+          cm.id,
+          cm.type,
+          ABS(cm.amount) AS amount,
+          cm.description,
+          cm.reference,
+          cm.payment_method,
+          cm.created_at,
+          ${artKey("cm.created_at")} AS sale_date,
+          u.name AS user_name
+        FROM cash_movements cm
+        LEFT JOIN users u ON u.id = cm.user_id
+        WHERE cm.type IN ('expense', 'withdrawal')
+          AND ${artDay("cm.created_at")} >= ?
+          AND ${artDay("cm.created_at")} <= ?
+        ORDER BY cm.created_at DESC, cm.id DESC
+        `,
+        [start_date, end_date],
+      ),
+      executeQuery(
+        `
+        SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS total
+        FROM sales
+        WHERE status = 'cancelled'
+          AND ${artDay("created_at")} >= ?
+          AND ${artDay("created_at")} <= ?
+        `,
+        [start_date, end_date],
+      ),
+    ])
+
+    const sales = groupSaleRows(saleRows)
+    const expenses = expenseRows.map((movement) => ({
+      id: movement.id,
+      type: movement.type,
+      amount: Number(movement.amount) || 0,
+      description: movement.description || "",
+      reference: movement.reference || "",
+      payment_method: movement.payment_method,
+      created_at: movement.created_at,
+      sale_date: movement.sale_date,
+      user_name: movement.user_name || "Sistema",
+    }))
+    const cancelled = cancelledRows[0] || { count: 0, total: 0 }
+
+    res.json({
+      success: true,
+      data: {
+        range: { start_date, end_date },
+        summary: summarizeProfits(sales, expenses, cancelled),
+        sales,
+        expenses,
+      },
+    })
+  } catch (error) {
+    console.error("Error obteniendo reporte de ganancias:", error)
+    res.status(500).json({
+      success: false,
+      message: "Error obteniendo el reporte de ganancias",
+      code: "PROFITS_REPORT_ERROR",
     })
   }
 }

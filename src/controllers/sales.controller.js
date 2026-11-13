@@ -1,4 +1,5 @@
 import { executeQuery, executeTransaction } from "../config/database.js"
+import { saleItemsHaveUnitCost } from "../utils/saleItemCost.js"
 
 // FUNCIÓN CORREGIDA: Registrar venta en caja para TODOS los métodos de pago
 export const registerSaleInCash = async (saleId, totalAmount, paymentMethod, paymentMethods, userId) => {
@@ -753,9 +754,10 @@ export const createSale = async (req, res) => {
     console.log("📦 Verificando stock de productos...")
     const productStockInfo = []
     for (const item of items) {
-      const productQuery = await executeQuery("SELECT id, name, stock, active, unit_type FROM products WHERE id = ?", [
-        Number.parseInt(item.product_id),
-      ])
+      const productQuery = await executeQuery(
+        "SELECT id, name, stock, active, unit_type, cost FROM products WHERE id = ?",
+        [Number.parseInt(item.product_id)],
+      )
 
       if (productQuery.length === 0) {
         console.log("❌ Error: Producto no encontrado:", item.product_id)
@@ -792,6 +794,7 @@ export const createSale = async (req, res) => {
         product_id: Number.parseInt(item.product_id),
         name: product.name,
         unit_type: product.unit_type,
+        cost: Number.parseFloat(product.cost) || 0,
         current_stock: product.stock,
         quantity_sold: requestedQuantity,
         new_stock: product.stock - requestedQuantity,
@@ -833,22 +836,30 @@ export const createSale = async (req, res) => {
     // Crear las queries para items y stock
     const queries = []
 
-    // CORREGIDO: Insertar items de venta con parseFloat
+    // CORREGIDO: Insertar items de venta con parseFloat y el costo del momento
+    const includeUnitCost = await saleItemsHaveUnitCost()
     for (const item of items) {
-      const itemQuery = {
-        query: `
+      const productInfo = productStockInfo.find((product) => product.product_id === Number.parseInt(item.product_id))
+      const quantity = Number.parseFloat(item.quantity)
+      const unitPrice = Number.parseFloat(item.unit_price)
+      const unitCost = productInfo?.cost ?? 0
+      const itemQuery = includeUnitCost
+        ? {
+            query: `
+        INSERT INTO sale_items (
+          sale_id, product_id, quantity, unit_price, unit_cost, subtotal, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `,
+            params: [saleId, Number.parseInt(item.product_id), quantity, unitPrice, unitCost, quantity * unitPrice],
+          }
+        : {
+            query: `
         INSERT INTO sale_items (
           sale_id, product_id, quantity, unit_price, subtotal, created_at
         ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       `,
-        params: [
-          saleId,
-          Number.parseInt(item.product_id),
-          Number.parseFloat(item.quantity), // CORREGIDO: parseFloat
-          Number.parseFloat(item.unit_price),
-          Number.parseFloat(item.quantity) * Number.parseFloat(item.unit_price),
-        ],
-      }
+            params: [saleId, Number.parseInt(item.product_id), quantity, unitPrice, quantity * unitPrice],
+          }
       queries.push(itemQuery)
     }
 
